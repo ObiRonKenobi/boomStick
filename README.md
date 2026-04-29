@@ -19,6 +19,7 @@ Use this tool only on systems you own or where you have explicit written permiss
   - Reflected XSS (reflection heuristic)
   - SQLi (boolean response fingerprint heuristic)
   - Directory traversal (passwd marker heuristic)
+- **Loud-mode web scanning**: OWASP ZAP (daemon + API alerts; optional spider/active scan)
 - **CVE lookup**: NVD API 2.0 keyword searches for discovered services (rate-limited; optional `NVD_API_KEY`)
 
 ## Install (Python deps)
@@ -40,6 +41,11 @@ Quiet mode uses Python-only checks and does not require external tools.
 - If `nmap` isn’t on PATH, set:
   - `BOOMSTICK_NMAP=C:\\Path\\To\\nmap.exe`
 
+OWASP ZAP (loud-mode vulnerability engine):
+- Auto-install is attempted via `winget` when missing.
+- You can also set an explicit path:
+  - `BOOMSTICK_ZAP=C:\\Path\\To\\zap.bat` (or `zap.exe`)
+
 Traceroute uses the built-in `tracert` (present by default).
 
 ### Linux (Debian/Ubuntu)
@@ -48,6 +54,11 @@ Traceroute uses the built-in `tracert` (present by default).
 sudo apt update
 sudo apt install -y nmap dnsutils whois traceroute
 ```
+
+OWASP ZAP (loud-mode vulnerability engine):
+- Auto-install is attempted via `apt install zaproxy` when missing.
+- You can also set an explicit path:
+  - `BOOMSTICK_ZAP=/opt/zap/zap.sh`
 
 ## Run
 

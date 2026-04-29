@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import dns.resolver
 
 from core.models import ScanConfig, ScanMode
-from core.utils.crossplatform import detect_tools, run_cmd_safe
+from core.utils.crossplatform import detect_tools, install_dig, run_cmd_safe
 from core.utils.network import normalize_target, is_ip
 
 
@@ -50,7 +50,16 @@ def dns_enumerate(config: ScanConfig, *, cancel_event=None) -> DnsEnumOutput:
     if config.mode == ScanMode.LOUD:
         tools = detect_tools()
         if tools.dig is None:
-            warnings.append("dig not found; skipping loud DNS gather")
+            ok, msg = install_dig()
+            warnings.append(msg)
+            if ok:
+                tools = detect_tools()
+            if tools.dig is None:
+                if ok:
+                    warnings.append(
+                        "dig install reported success but dig.exe was not found. Try restarting your shell, or set BOOMSTICK_DIG to the full path of dig.exe."
+                    )
+                warnings.append("dig not found; skipping loud DNS gather")
         else:
             argv = [str(tools.dig), target, "ANY", "+noall", "+answer"]
             rc, out, err = run_cmd_safe(argv, timeout_s=30)

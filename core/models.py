@@ -23,6 +23,12 @@ SubdomainStrategy = Literal[
     "external_tools_aggressive",
 ]
 
+ZapScanType = Literal[
+    "passive_only",
+    "spider_plus_passive",
+    "spider_plus_active",
+]
+
 
 class Severity(str, Enum):
     INFO = "info"
@@ -37,6 +43,8 @@ class ScanConfig:
     mode: ScanMode = ScanMode.QUIET
     scope: ScanScope = ScanScope.BOTH
     subdomain_strategy: SubdomainStrategy = "bounded_bruteforce"
+    zap_scan_type: ZapScanType = "spider_plus_passive"
+    enable_traceroute: bool = True
 
     # Safety / throttles
     max_pages: int = 50
@@ -46,6 +54,7 @@ class ScanConfig:
     # Enumeration defaults
     port_timeout_s: float = 1.0
     port_concurrency: int = 200
+    traceroute_timeout_s: int = 90
     common_ports: tuple[int, ...] = (
         21,
         22,

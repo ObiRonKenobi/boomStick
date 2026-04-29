@@ -11,7 +11,7 @@ import dns.resolver
 import requests
 
 from core.models import ScanConfig, ScanMode, SubdomainStrategy
-from core.utils.crossplatform import run_cmd_safe
+from core.utils.crossplatform import install_amass, install_subfinder, run_cmd_safe
 from core.utils.network import normalize_target, is_ip, is_domain
 
 
@@ -120,6 +120,19 @@ def _run_external_tool(tool: str, domain: str, *, timeout_s: int = 180) -> tuple
         return [], f"Unknown external tool: {tool}"
 
     rc, out, err = run_cmd_safe(argv, timeout_s=timeout_s)
+    if rc == 127:
+        # Attempt install, then retry once.
+        if tool == "subfinder":
+            ok, msg = install_subfinder()
+        elif tool == "amass":
+            ok, msg = install_amass()
+        else:
+            ok, msg = False, f"Auto-install not supported for {tool}"
+        if not ok:
+            return [], f"{tool} not found; install failed: {msg}"
+        rc, out, err = run_cmd_safe(argv, timeout_s=timeout_s)
+        if rc == 127:
+            return [], f"{tool} install reported success but executable is still not on PATH"
     if rc != 0 and not out:
         return [], f"{tool} failed: {err.strip() or rc}"
     subs: list[str] = []

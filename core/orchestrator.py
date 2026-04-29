@@ -8,10 +8,11 @@ from core.enumeration.dns_enum import dns_enumerate
 from core.enumeration.port_scan import port_scan
 from core.enumeration.subdomain import discover_subdomains
 from core.enumeration.traceroute import traceroute
-from core.models import EnumerationReport, ScanConfig, ScanResult, ScanScope
+from core.models import EnumerationReport, ScanConfig, ScanMode, ScanResult, ScanScope
 from core.utils.network import build_base_urls, is_domain, is_ip, normalize_target, resolve_host
 from core.vulnerability.cve_checker import query_nvd_for_services
 from core.vulnerability.web_vuln import crawl_and_test
+from core.vulnerability.zap_scanner import zap_scan
 
 
 @dataclass(frozen=True)
@@ -70,12 +71,13 @@ def build_plan(
                 run=lambda result: _run_ports(config, result, cancel_event=cancel_event),
             )
         )
-        steps.append(
-            ScanStep(
-                name="Traceroute",
-                run=lambda result: _run_traceroute(config, result, cancel_event=cancel_event),
+        if getattr(config, "enable_traceroute", True):
+            steps.append(
+                ScanStep(
+                    name="Traceroute",
+                    run=lambda result: _run_traceroute(config, result, cancel_event=cancel_event),
+                )
             )
-        )
 
     if do_vuln:
         steps.append(
@@ -157,11 +159,23 @@ def _run_web_vuln(config: ScanConfig, result: ScanResult, *, cancel_event=None) 
         return {"skipped": "no_web_ports"}
 
     base_urls = build_base_urls(host, ports=ports if ports else None)
+    if config.mode == ScanMode.LOUD:
+        zap_out = zap_scan(
+            config,
+            base_urls=base_urls,
+            scan_type=config.zap_scan_type,
+            cancel_event=cancel_event,
+        )
+        result.vulnerabilities.findings.extend(zap_out.findings)
+        if zap_out.warnings:
+            result.warnings.extend(zap_out.warnings)
+        return {"findings": [f.__dict__ for f in zap_out.findings], "engine": "owasp_zap"}
+
     out = crawl_and_test(config, base_urls=base_urls, cancel_event=cancel_event)
     result.vulnerabilities.findings.extend(out.findings)
     if out.warnings:
         result.warnings.extend(out.warnings)
-    return {"findings": [f.__dict__ for f in out.findings], "scanned_urls": out.scanned_urls}
+    return {"findings": [f.__dict__ for f in out.findings], "scanned_urls": out.scanned_urls, "engine": "builtin"}
 
 
 def _run_cve(config: ScanConfig, result: ScanResult, *, cancel_event=None) -> dict[str, Any]:

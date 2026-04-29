@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from core.models import ScanConfig, ScanMode, Service
-from core.utils.crossplatform import detect_tools, run_cmd_safe
+from core.utils.crossplatform import detect_tools, install_nmap, run_cmd_safe
 from core.utils.network import normalize_target, resolve_host
 
 
@@ -93,7 +93,14 @@ class PortScanOutput:
 def loud_nmap_scan(target: str, ports: Iterable[int] | None = None) -> PortScanOutput:
     tools = detect_tools()
     if tools.nmap is None:
-        return PortScanOutput(services=[], raw_nmap_xml=None, warnings=["nmap not found; skipping loud scan"])
+        ok, msg = install_nmap()
+        warnings: list[str] = []
+        if ok:
+            warnings.append(msg)
+            tools = detect_tools()
+        if tools.nmap is None:
+            warnings.append("nmap not found; skipping loud scan")
+            return PortScanOutput(services=[], raw_nmap_xml=None, warnings=warnings)
 
     # -Pn to skip host discovery (more consistent), -sV for versions, -oX - for XML to stdout
     argv = [str(tools.nmap), "-Pn", "-sV", "-oX", "-"]

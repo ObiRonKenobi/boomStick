@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from core.models import ScanConfig, ScanMode
-from core.utils.crossplatform import detect_tools, run_cmd_safe
+from core.utils.crossplatform import detect_tools, install_traceroute, platform_name, run_cmd_safe
 from core.utils.network import normalize_target
 
 
@@ -33,26 +33,34 @@ def _parse_system_traceroute(text: str) -> list[dict]:
     return hops
 
 
-def loud_traceroute(target: str) -> TracerouteOutput:
+def loud_traceroute(target: str, *, timeout_s: int = 90) -> TracerouteOutput:
     tools = detect_tools()
     if tools.traceroute is None:
-        return TracerouteOutput(hops=[], raw=None, warnings=["traceroute/tracert not found"])
+        ok, msg = install_traceroute()
+        warnings: list[str] = []
+        if ok:
+            warnings.append(msg)
+            tools = detect_tools()
+        if tools.traceroute is None:
+            warnings.append("traceroute/tracert not found")
+            return TracerouteOutput(hops=[], raw=None, warnings=warnings)
 
-    system = platform.system()
+    system = platform_name()
     exe = str(tools.traceroute)
     if system == "Windows":
         argv = [exe, "-d", target]  # -d: no DNS lookup (faster)
-        timeout_s = 60
     else:
         # traceroute or tracepath
         if exe.lower().endswith("tracepath"):
             argv = [exe, target]
-            timeout_s = 60
         else:
             argv = [exe, "-n", target]
-            timeout_s = 60
 
-    rc, out, err = run_cmd_safe(argv, timeout_s=timeout_s)
+    try:
+        rc, out, err = run_cmd_safe(argv, timeout_s=int(timeout_s))
+    except Exception as e:
+        # Treat as warning to avoid failing the whole scan (many networks block traceroute).
+        return TracerouteOutput(hops=[], raw=None, warnings=[f"traceroute failed: {e}"])
     if rc != 0 and not out:
         return TracerouteOutput(hops=[], raw=None, warnings=[f"traceroute failed: {err.strip() or rc}"])
     return TracerouteOutput(hops=_parse_system_traceroute(out), raw=out, warnings=[w for w in [err.strip()] if w])
@@ -98,7 +106,11 @@ def quiet_tcp_hop_inference(target: str, port: int, *, max_hops: int = 20, timeo
 def traceroute(config: ScanConfig, *, open_ports: Iterable[int] = (), cancel_event=None) -> TracerouteOutput:
     target = normalize_target(config.target)
     if config.mode == ScanMode.LOUD:
-        return loud_traceroute(target)
+        out = loud_traceroute(target, timeout_s=int(config.traceroute_timeout_s))
+        # Normalize timeouts into warnings, never hard errors.
+        if out.warnings:
+            return out
+        return out
 
     # Quiet mode: pick a likely-open port
     ports = list(int(p) for p in open_ports)
