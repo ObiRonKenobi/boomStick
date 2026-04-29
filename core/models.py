@@ -108,6 +108,7 @@ class Service:
     product: str | None = None
     version: str | None = None
     banner: str | None = None
+    cpes: list[str] = field(default_factory=list)
 
     def display_name(self) -> str:
         bits = [self.name or "unknown"]

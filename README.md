@@ -20,7 +20,7 @@ Use this tool only on systems you own or where you have explicit written permiss
   - SQLi (boolean response fingerprint heuristic)
   - Directory traversal (passwd marker heuristic)
 - **Loud-mode web scanning**: OWASP ZAP (daemon + API alerts; optional spider/active scan)
-- **CVE lookup**: NVD API 2.0 keyword searches for discovered services (rate-limited; optional `NVD_API_KEY`)
+- **CVE lookup**: Offline NVD mirror (SQLite) built from NVD JSON feeds (no API rate limits)
 
 ## Install (Python deps)
 
@@ -66,13 +66,24 @@ OWASP ZAP (loud-mode vulnerability engine):
 python main.py
 ```
 
-## NVD API (optional)
+## Offline NVD database (recommended)
 
-Set an API key to increase rate limits:
+Build/update the local SQLite database (default `data/nvd.sqlite`):
 
-- `NVD_API_KEY=...`
+```bash
+python tools/update_nvd_db.py
+```
 
-Without a key, boomStick uses conservative spacing between requests to stay under the public limit.
+First-time build (recommended): import year feeds (bigger) and then keep updated via `modified`:
+
+```bash
+# example: last 2 years + modified
+python tools/update_nvd_db.py --feeds 2026 2025 modified
+```
+
+To store the DB elsewhere, set:
+
+- `BOOMSTICK_NVD_DB=C:\\Path\\To\\nvd.sqlite` (Windows) or `BOOMSTICK_NVD_DB=/path/to/nvd.sqlite` (Linux)
 
 ## Packaging (PyInstaller)
 

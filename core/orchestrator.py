@@ -10,7 +10,7 @@ from core.enumeration.subdomain import discover_subdomains
 from core.enumeration.traceroute import traceroute
 from core.models import EnumerationReport, ScanConfig, ScanMode, ScanResult, ScanScope
 from core.utils.network import build_base_urls, is_domain, is_ip, normalize_target, resolve_host
-from core.vulnerability.cve_checker import query_nvd_for_services
+from core.vulnerability.cve_checker import query_offline_nvd_for_services
 from core.vulnerability.web_vuln import crawl_and_test
 from core.vulnerability.zap_scanner import zap_scan
 
@@ -181,7 +181,11 @@ def _run_web_vuln(config: ScanConfig, result: ScanResult, *, cancel_event=None) 
 def _run_cve(config: ScanConfig, result: ScanResult, *, cancel_event=None) -> dict[str, Any]:
     if not result.enumeration.open_ports:
         return {"skipped": "no_services"}
-    out = query_nvd_for_services(result.enumeration.open_ports, cancel_event=cancel_event)
+    out = query_offline_nvd_for_services(
+        result.enumeration.open_ports,
+        project_root=Path(__file__).resolve().parents[1],
+        cancel_event=cancel_event,
+    )
     result.vulnerabilities.cves.extend(out.cves)
     if out.warnings:
         result.warnings.extend(out.warnings)

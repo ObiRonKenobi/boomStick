@@ -69,6 +69,13 @@ def _parse_nmap_xml(xml_text: str) -> list[Service]:
             name = svc_el.get("name") if svc_el is not None else None
             product = svc_el.get("product") if svc_el is not None else None
             version = svc_el.get("version") if svc_el is not None else None
+            cpes: list[str] = []
+            if svc_el is not None:
+                for cpe_el in svc_el.findall("cpe"):
+                    if cpe_el.text:
+                        c = cpe_el.text.strip()
+                        if c and c not in cpes:
+                            cpes.append(c)
             services.append(
                 Service(
                     port=portid,
@@ -77,6 +84,7 @@ def _parse_nmap_xml(xml_text: str) -> list[Service]:
                     name=name,
                     product=product,
                     version=version,
+                    cpes=cpes,
                 )
             )
     services.sort(key=lambda s: (s.proto, s.port))

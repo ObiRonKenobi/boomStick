@@ -11,6 +11,20 @@ from core.models import ScanConfig, ScanResult
 from core.orchestrator import build_plan
 
 
+def _toolish_label(step_name: str, config: ScanConfig) -> str:
+    if step_name == "Ports" and config.mode.value == "loud":
+        return "Running nmap"
+    if step_name == "DNS" and config.mode.value == "loud":
+        return "Running dig"
+    if step_name == "Traceroute" and config.mode.value == "loud":
+        return "Running traceroute/tracert"
+    if step_name == "WebVuln" and config.mode.value == "loud":
+        return "Running OWASP ZAP"
+    if step_name == "CVE":
+        return "Matching CVEs (offline NVD)"
+    return f"Running {step_name}"
+
+
 def _jsonify(obj: Any) -> Any:
     if isinstance(obj, datetime):
         return obj.isoformat()
@@ -56,9 +70,20 @@ def scan_worker(
             if cancel.is_set():
                 q.put({"type": "error", "message": "Cancelled"})
                 return
-            q.put({"type": "progress", "pct": (i / total), "label": step.name})
-            payload: dict[str, Any] = step.run(result)
-            q.put({"type": "partial", "step": step.name, "payload": payload})
+            label = _toolish_label(step.name, config)
+            q.put({"type": "progress", "pct": (i / total), "label": label})
+            q.put({"type": "log", "text": f"[start] {label}\n"})
+            try:
+                payload: dict[str, Any] = step.run(result)
+                merged = dict(payload)
+                merged["ok"] = True
+                q.put({"type": "partial", "step": step.name, "payload": merged})
+                q.put({"type": "log", "text": f"[ok] {step.name}\n"})
+            except Exception as e:
+                # Don’t kill the whole scan for one step; log and continue.
+                result.warnings.append(f"{step.name} failed: {e}")
+                q.put({"type": "partial", "step": step.name, "payload": {"ok": False, "error": str(e)}})
+                q.put({"type": "log", "text": f"[fail] {step.name}: {e}\n"})
 
         result.finish()
         q.put({"type": "progress", "pct": 1.0, "label": "Done"})

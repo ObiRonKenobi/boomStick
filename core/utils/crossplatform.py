@@ -30,6 +30,33 @@ def _which(name: str) -> Path | None:
     return Path(p) if p else None
 
 
+def _winget_packages_dir() -> Path | None:
+    """Portable winget installs (BIND, Sysinternals, etc.) land under this tree."""
+    local = os.environ.get("LOCALAPPDATA")
+    if not local:
+        return None
+    d = Path(local) / "Microsoft" / "WinGet" / "Packages"
+    return d if d.is_dir() else None
+
+
+def _find_exe_under_winget_packages(*basenames: str) -> Path | None:
+    """
+    Locate an executable under WinGet's Packages folder (common for portable zips).
+    Tries each basename in order (e.g. whois.exe, WhoIs.exe).
+    """
+    root = _winget_packages_dir()
+    if not root:
+        return None
+    try:
+        for name in basenames:
+            for p in root.rglob(name):
+                if p.is_file():
+                    return p
+    except OSError:
+        pass
+    return None
+
+
 def platform_name() -> str:
     # Cached at import time so the app chooses tools consistently per run.
     return SYSTEM
@@ -65,7 +92,7 @@ def find_dig() -> Path | None:
     p = _which("dig")
     if p:
         return p
-    # Windows: dig is typically shipped with ISC BIND
+    # Windows: dig is typically shipped with ISC BIND (installer or winget portable zip)
     if platform_name() == "Windows":
         pf = os.environ.get("ProgramFiles", r"C:\Program Files")
         pfx86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
@@ -74,10 +101,17 @@ def find_dig() -> Path | None:
             Path(pfx86) / "ISC BIND 9" / "bin" / "dig.exe",
             Path(pf) / "BIND9" / "bin" / "dig.exe",
             Path(pfx86) / "BIND9" / "bin" / "dig.exe",
+            Path(pf) / "ISC" / "BIND 9" / "bin" / "dig.exe",
+            Path(pfx86) / "ISC" / "BIND 9" / "bin" / "dig.exe",
+            Path(pf) / "ISC" / "BIND9" / "bin" / "dig.exe",
+            Path(pfx86) / "ISC" / "BIND9" / "bin" / "dig.exe",
         ]
         for c in candidates:
             if c.is_file():
                 return c
+        wg = _find_exe_under_winget_packages("dig.exe")
+        if wg:
+            return wg
     return None
 
 
@@ -86,7 +120,27 @@ def find_whois() -> Path | None:
     if env:
         p = Path(env)
         return p if p.is_file() else None
-    return _which("whois")
+    w = _which("whois")
+    if w:
+        return w
+    # Windows: Sysinternals ships WhoIs.exe; some installers use whois.exe only.
+    if platform_name() == "Windows":
+        for alt in ("WhoIs", "whois", "Whois"):
+            w2 = _which(alt)
+            if w2:
+                return w2
+        wg = _find_exe_under_winget_packages("whois.exe", "Whois.exe", "WhoIs.exe")
+        if wg:
+            return wg
+        pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+        pfx86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        for base in (Path(pf), Path(pfx86)):
+            for sub in ("Sysinternals", "SysinternalsSuite"):
+                for exe in ("whois.exe", "WhoIs.exe", "Whois.exe"):
+                    cand = base / sub / exe
+                    if cand.is_file():
+                        return cand
+    return None
 
 
 def find_traceroute() -> Path | None:
@@ -242,10 +296,30 @@ def install_nmap() -> tuple[bool, str]:
         return False, f"nmap install failed: {e}"
 
 
+def _winget_install(pkg_id: str, *, timeout_s: int = 600) -> tuple[int, str, str]:
+    """Install from winget community repo only (avoids msstore agreement prompts)."""
+    winget = _which("winget")
+    if not winget:
+        return 127, "", "winget not found"
+    argv = [
+        str(winget),
+        "install",
+        "--id",
+        pkg_id,
+        "-e",
+        "-h",
+        "--source",
+        "winget",
+        "--accept-package-agreements",
+        "--accept-source-agreements",
+    ]
+    return run_cmd_safe(argv, timeout_s=timeout_s)
+
+
 def install_dig() -> tuple[bool, str]:
     """
     Best-effort install of dig.
-    - Windows: winget install --id ISC.BIND -e (dig ships with BIND)
+    - Windows: winget install ISC.Bind (official manifest id is ISC.Bind; includes dig.exe)
     - Linux: apt install dnsutils
     """
     system = platform_name()
@@ -254,15 +328,18 @@ def install_dig() -> tuple[bool, str]:
             winget = _which("winget")
             if not winget:
                 return False, "winget not found; install BIND/dig manually"
-            # winget IDs can vary by manifest; try a few common ones.
-            for pkg_id in ("ISC.BIND", "ISC.BIND9", "ISC.Bind"):
-                rc, out, err = run_cmd_safe(
-                    [str(winget), "install", "--id", pkg_id, "-e", "--source", "winget"],
-                    timeout_s=600,
-                )
-                if rc == 0:
-                    return True, f"Installed {pkg_id} (dig) via winget"
-            return False, "winget could not install a BIND package (try installing BIND/dig manually and set BOOMSTICK_DIG)"
+            # Correct winget id from manifest search (not ISC.BIND).
+            rc, out, err = _winget_install("ISC.Bind")
+            if rc == 0:
+                return True, "Installed ISC.Bind (dig) via winget"
+            detail = (err.strip() or out.strip() or f"exit {rc}")
+            return (
+                False,
+                "winget could not install ISC.Bind (dig). "
+                "Ensure Microsoft VC++ 2015+ redistributable (x64) is installed; "
+                "or download BIND for Windows from ISC and set BOOMSTICK_DIG to dig.exe. "
+                f"Details: {detail}",
+            )
         apt = _which("apt-get") or _which("apt")
         if not apt:
             return False, "apt not found; install dnsutils manually"
@@ -308,7 +385,7 @@ def install_traceroute() -> tuple[bool, str]:
 def install_whois() -> tuple[bool, str]:
     """
     Best-effort install of whois.
-    - Windows: winget install --id GNU.Whois -e
+    - Windows: Sysinternals WhoIs via winget (GNU.Whois is not on winget)
     - Linux: apt install whois
     """
     system = platform_name()
@@ -317,13 +394,19 @@ def install_whois() -> tuple[bool, str]:
             winget = _which("winget")
             if not winget:
                 return False, "winget not found; install whois manually"
-            rc, out, err = run_cmd_safe(
-                [str(winget), "install", "--id", "GNU.Whois", "-e", "--source", "winget"],
-                timeout_s=600,
+            # GNU.Whois does not exist in winget; Sysinternals WhoIs is the usual portable choice.
+            last_detail = ""
+            for pkg_id in ("Microsoft.Sysinternals.Whois", "Akaere.whois"):
+                rc, out, err = _winget_install(pkg_id)
+                if rc == 0:
+                    return True, f"Installed {pkg_id} (whois) via winget"
+                last_detail = err.strip() or out.strip() or str(rc)
+            return (
+                False,
+                "winget could not install a whois client (Sysinternals or Akaere). "
+                "Download WhoIs from Microsoft Sysinternals or set BOOMSTICK_WHOIS. "
+                f"Details: {last_detail}",
             )
-            if rc == 0:
-                return True, "Installed whois via winget"
-            return False, f"winget install whois failed: {err.strip() or out.strip() or rc}"
         apt = _which("apt-get") or _which("apt")
         if not apt:
             return False, "apt not found; install whois manually"

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import queue
+import subprocess
+import sys
 import threading
+from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox
 from typing import Any
@@ -22,7 +25,9 @@ class MainWindow(ctk.CTk):
         self.geometry("900x700")
 
         self._queue: queue.Queue = queue.Queue()
+        self._tools_queue: queue.Queue = queue.Queue()
         self._worker: threading.Thread | None = None
+        self._nvd_worker: threading.Thread | None = None
         self._cancel = threading.Event()
         self._last_result: dict[str, Any] | None = None
 
@@ -113,6 +118,8 @@ class MainWindow(ctk.CTk):
         self.summary_overview = ScrollableText(self.tabs.tab("Summary"), height=180)
         self.summary_overview.pack(fill="x", expand=False, padx=10, pady=(10, 6))
         self.summary_overview.set_text("Ready.\n")
+        self.summary_activity = CollapsibleSection(self.tabs.tab("Summary"), title="Activity log", start_open=True)
+        self.summary_activity.pack(fill="both", expand=True, padx=10, pady=(0, 6))
         self.summary_warnings = CollapsibleSection(self.tabs.tab("Summary"), title="Warnings", start_open=False)
         self.summary_warnings.pack(fill="both", expand=True, padx=10, pady=(0, 6))
         self.summary_errors = CollapsibleSection(self.tabs.tab("Summary"), title="Errors", start_open=False)
@@ -146,6 +153,24 @@ class MainWindow(ctk.CTk):
             side="left", padx=10, pady=10
         )
         ctk.CTkButton(tools_top, text="Refresh", command=self._render_tools).pack(side="right", padx=10, pady=10)
+
+        tools_actions = ctk.CTkFrame(ttab)
+        tools_actions.pack(fill="x", padx=10, pady=(0, 6))
+        ctk.CTkLabel(tools_actions, text="Offline NVD DB:").pack(side="left", padx=(10, 6), pady=10)
+        self.nvd_preset = ctk.StringVar(value="quick_recent_modified")
+        ctk.CTkOptionMenu(
+            tools_actions,
+            variable=self.nvd_preset,
+            values=[
+                "quick_recent_modified",
+                "full_last2years_plus_modified",
+                "full_last5years_plus_modified",
+            ],
+        ).pack(side="left", padx=(0, 10), pady=10)
+        self.nvd_update_btn = ctk.CTkButton(tools_actions, text="Update NVD DB", command=self._start_nvd_update)
+        self.nvd_update_btn.pack(side="left", padx=(0, 10), pady=10)
+        self.nvd_status = ctk.CTkLabel(tools_actions, text="Idle")
+        self.nvd_status.pack(side="left", padx=10, pady=10)
 
         self.tools_box = ScrollableText(ttab, height=420)
         self.tools_box.pack(fill="both", expand=True, padx=10, pady=(0, 10))
@@ -188,6 +213,8 @@ class MainWindow(ctk.CTk):
         self.progress.set(0.0)
         self.status.configure(text="Starting…")
         self.summary_overview.set_text("Running scan…\n")
+        self.summary_activity.set_heading("Activity log", 0)
+        self.summary_activity.set_body("")
         self.summary_warnings.set_heading("Warnings", 0)
         self.summary_warnings.set_body("")
         self.summary_errors.set_heading("Errors", 0)
@@ -233,6 +260,14 @@ class MainWindow(ctk.CTk):
                 self._handle_msg(msg)
         except queue.Empty:
             pass
+
+        # Tools background tasks (e.g., offline NVD updater)
+        try:
+            while True:
+                msg = self._tools_queue.get_nowait()
+                self._handle_tools_msg(msg)
+        except queue.Empty:
+            pass
         self.after(100, self._poll_queue)
 
     def _handle_msg(self, msg: dict[str, Any]) -> None:
@@ -241,10 +276,22 @@ class MainWindow(ctk.CTk):
             pct = float(msg.get("pct", 0.0))
             self.progress.set(max(0.0, min(1.0, pct)))
             self.status.configure(text=str(msg.get("label", "")))
+            # Also append to activity log for traceability.
+            label = str(msg.get("label", ""))
+            if label and label not in ("Planning", "Done"):
+                self._append_activity(f"[status] {label}\n")
         elif t == "partial":
             # For now we re-render on done; partials can be enhanced to update per-section.
             step = msg.get("step")
+            payload = msg.get("payload") or {}
+            ok = payload.get("ok")
+            if ok is True:
+                self._append_activity(f"[step-ok] {step}\n")
+            elif ok is False:
+                self._append_activity(f"[step-fail] {step}: {payload.get('error')}\n")
             self.status.configure(text=f"{step}…")
+        elif t == "log":
+            self._append_activity(str(msg.get("text", "")))
         elif t == "error":
             self.status.configure(text=f"Error: {msg.get('message')}")
         elif t == "done":
@@ -257,6 +304,33 @@ class MainWindow(ctk.CTk):
             self.export_btn.configure(state="normal" if self._last_result else "disabled")
             self.progress.set(1.0)
             self.status.configure(text="Idle")
+
+    def _append_activity(self, text: str) -> None:
+        existing = self.summary_activity.body_text.text.get("1.0", "end")  # type: ignore[attr-defined]
+        # Body text is a ScrollableText; use its append helper.
+        self.summary_activity.body_text.append(text)
+        # Keep the heading count roughly equal to number of lines.
+        try:
+            lines = int(float(self.summary_activity.body_text.text.index("end-1c").split(".")[0]))  # type: ignore[attr-defined]
+            self.summary_activity.set_heading("Activity log", max(0, lines - 1))
+        except Exception:
+            self.summary_activity.set_heading("Activity log")
+
+    def _handle_tools_msg(self, msg: dict[str, Any]) -> None:
+        t = msg.get("type")
+        if t == "nvd_log":
+            self.tools_box.append(msg.get("text", ""))
+        elif t == "nvd_status":
+            self.nvd_status.configure(text=str(msg.get("text", "")))
+        elif t == "nvd_done":
+            self.nvd_status.configure(text="Done")
+            self.nvd_update_btn.configure(state="normal")
+            self._render_tools()
+        elif t == "nvd_error":
+            self.nvd_status.configure(text="Error")
+            self.nvd_update_btn.configure(state="normal")
+            self.tools_box.append("\n[NVD] ERROR: " + str(msg.get("text", "")) + "\n")
+            self._render_tools()
 
     def _clear_enum(self) -> None:
         self.enum_ips.set_heading("Resolved IPs", 0)
@@ -386,6 +460,19 @@ class MainWindow(ctk.CTk):
             summary_txt = c.get("summary")
             url = c.get("url")
             c_lines.append(f"- {cve}")
+            match = c.get("match") or {}
+            svc = c.get("service") or {}
+            if match.get("query"):
+                c_lines.append(f"  Matched query: {match.get('query')}")
+            if svc.get("port") or svc.get("name"):
+                c_lines.append(
+                    f"  Service: {svc.get('port')}/{(svc.get('proto') or 'tcp')} {svc.get('name') or ''} {svc.get('product') or ''} {svc.get('version') or ''}".strip()
+                )
+            cpes = svc.get("cpes") or match.get("cpes") or []
+            if cpes:
+                c_lines.append("  CPEs:")
+                for cp in cpes[:5]:
+                    c_lines.append(f"    - {cp}")
             if summary_txt:
                 c_lines.append(f"  {str(summary_txt)[:240]}")
             if url:
@@ -436,4 +523,55 @@ class MainWindow(ctk.CTk):
         lines.append("- You can always set BOOMSTICK_* env vars to point directly to the tool executable.")
 
         self.tools_box.set_text("\n".join(lines).strip() + "\n")
+
+    def _nvd_feeds_for_preset(self) -> list[str]:
+        preset = self.nvd_preset.get()
+        year = datetime.now().year
+        if preset == "quick_recent_modified":
+            return ["recent", "modified"]
+        if preset == "full_last2years_plus_modified":
+            return [str(year), str(year - 1), "modified"]
+        if preset == "full_last5years_plus_modified":
+            return [str(year - i) for i in range(0, 5)] + ["modified"]
+        return ["recent", "modified"]
+
+    def _start_nvd_update(self) -> None:
+        if self._nvd_worker and self._nvd_worker.is_alive():
+            messagebox.showinfo("boomStick", "NVD update is already running.")
+            return
+        self.nvd_update_btn.configure(state="disabled")
+        self.nvd_status.configure(text="Running…")
+
+        # Clear and show header
+        self.tools_box.append("\n[NVD] Starting offline DB update…\n")
+        feeds = self._nvd_feeds_for_preset()
+        db_path = self.project_root / "data" / "nvd.sqlite"
+        self.tools_box.append(f"[NVD] DB: {db_path}\n")
+        self.tools_box.append(f"[NVD] Feeds: {' '.join(feeds)}\n")
+
+        def worker() -> None:
+            try:
+                script = self.project_root / "tools" / "update_nvd_db.py"
+                cmd = [sys.executable, str(script), "--db", str(db_path), "--feeds", *feeds]
+                self._tools_queue.put({"type": "nvd_status", "text": "Downloading/ingesting…"})
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    cwd=str(self.project_root),
+                )
+                assert proc.stdout is not None
+                for line in proc.stdout:
+                    self._tools_queue.put({"type": "nvd_log", "text": line})
+                rc = proc.wait()
+                if rc != 0:
+                    self._tools_queue.put({"type": "nvd_error", "text": f"Updater exited with code {rc}"})
+                else:
+                    self._tools_queue.put({"type": "nvd_done"})
+            except Exception as e:
+                self._tools_queue.put({"type": "nvd_error", "text": str(e)})
+
+        self._nvd_worker = threading.Thread(target=worker, daemon=True)
+        self._nvd_worker.start()
 
