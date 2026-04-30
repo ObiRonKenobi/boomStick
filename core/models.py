@@ -45,6 +45,11 @@ class ScanConfig:
     subdomain_strategy: SubdomainStrategy = "bounded_bruteforce"
     zap_scan_type: ZapScanType = "spider_plus_passive"
     enable_traceroute: bool = True
+    # DNS AXFR: opt-in; only run against targets you are authorized to test.
+    enable_zone_transfer: bool = False
+    zone_transfer_timeout_s: float = 10.0
+    zone_transfer_lifetime_s: float = 60.0
+    zone_transfer_max_names: int = 5000
 
     # Safety / throttles
     max_pages: int = 50
@@ -123,6 +128,8 @@ class Service:
 class EnumerationReport:
     resolved_ips: list[str] = field(default_factory=list)
     dns_records: dict[str, list[str]] = field(default_factory=dict)
+    # AXFR summary + discovered names (when enabled); TSIG not supported.
+    zone_transfer: dict[str, Any] = field(default_factory=dict)
     subdomains: list[str] = field(default_factory=list)
     open_ports: list[Service] = field(default_factory=list)
     traceroute: list[dict[str, Any]] = field(default_factory=list)  # hop dicts

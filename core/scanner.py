@@ -12,6 +12,8 @@ from core.orchestrator import build_plan
 
 
 def _toolish_label(step_name: str, config: ScanConfig) -> str:
+    if step_name == "ZoneTransfer":
+        return "DNS zone transfer (AXFR)"
     if step_name == "Ports" and config.mode.value == "loud":
         return "Running nmap"
     if step_name == "DNS" and config.mode.value == "loud":

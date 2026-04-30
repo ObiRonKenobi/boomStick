@@ -93,6 +93,13 @@ class MainWindow(ctk.CTk):
         self.enable_traceroute = ctk.BooleanVar(value=True)
         ctk.CTkCheckBox(row, text="Traceroute", variable=self.enable_traceroute).pack(side="left", padx=(10, 0))
 
+        self.enable_zone_transfer = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            row,
+            text="Zone transfer (AXFR)",
+            variable=self.enable_zone_transfer,
+        ).pack(side="left", padx=(10, 0))
+
         btns = ctk.CTkFrame(top)
         btns.pack(fill="x", padx=10, pady=(0, 10))
 
@@ -131,6 +138,8 @@ class MainWindow(ctk.CTk):
         self.enum_ips.pack(fill="both", expand=True, padx=10, pady=(10, 6))
         self.enum_dns = CollapsibleSection(etab, title="DNS records", start_open=False)
         self.enum_dns.pack(fill="both", expand=True, padx=10, pady=(0, 6))
+        self.enum_axfr = CollapsibleSection(etab, title="Zone transfer (AXFR)", start_open=False)
+        self.enum_axfr.pack(fill="both", expand=True, padx=10, pady=(0, 6))
         self.enum_subdomains = CollapsibleSection(etab, title="Subdomains", start_open=False)
         self.enum_subdomains.pack(fill="both", expand=True, padx=10, pady=(0, 6))
         self.enum_ports = CollapsibleSection(etab, title="Open ports", start_open=True)
@@ -203,6 +212,7 @@ class MainWindow(ctk.CTk):
             subdomain_strategy=self.subdomain_strategy.get(),  # type: ignore[arg-type]
             zap_scan_type=self.zap_scan_type.get(),  # type: ignore[arg-type]
             enable_traceroute=bool(self.enable_traceroute.get()),
+            enable_zone_transfer=bool(self.enable_zone_transfer.get()),
         )
 
         self._cancel.clear()
@@ -337,6 +347,8 @@ class MainWindow(ctk.CTk):
         self.enum_ips.set_body("")
         self.enum_dns.set_heading("DNS records", 0)
         self.enum_dns.set_body("")
+        self.enum_axfr.set_heading("Zone transfer (AXFR)", 0)
+        self.enum_axfr.set_body("")
         self.enum_subdomains.set_heading("Subdomains", 0)
         self.enum_subdomains.set_body("")
         self.enum_ports.set_heading("Open ports", 0)
@@ -395,6 +407,42 @@ class MainWindow(ctk.CTk):
                 dns_count += 1
         self.enum_dns.set_heading("DNS records", dns_count)
         self.enum_dns.set_body("\n".join(dns_lines).strip() + ("\n" if dns_lines else ""))
+
+        zt = enum.get("zone_transfer") or {}
+        zt_attempts = zt.get("attempts") or []
+        zt_names = zt.get("discovered_names") or []
+        ax_lines: list[str] = []
+        if zt:
+            ax_lines.append(f"Apex: {zt.get('apex', '-')}")
+            ax_lines.append(f"Nodes (zone): {zt.get('discovered_nodes_total', 0)}")
+            ax_lines.append(f"RDATA rows (approx): {zt.get('rdata_rows', 0)}")
+            ax_lines.append("")
+            ax_lines.append("Attempts:")
+            for a in zt_attempts[:20]:
+                ns = a.get("nameserver", "?")
+                where = a.get("where") or "-"
+                ok = a.get("ok")
+                ax_lines.append(f"  - {ns} @ {where}  ok={ok}")
+                if not ok and a.get("error"):
+                    ax_lines.append(f"      {str(a.get('error'))[:180]}")
+                elif ok:
+                    ax_lines.append(
+                        f"      names_returned={a.get('names_returned')} "
+                        f"nodes_total={a.get('nodes_total')} rdatas={a.get('rdatas')}"
+                    )
+            if len(zt_attempts) > 20:
+                ax_lines.append(f"  ... truncated ({len(zt_attempts) - 20} more attempts)")
+            ax_lines.append("")
+            ax_lines.append("Discovered names (sample):")
+            sample_n = 120
+            for n in zt_names[:sample_n]:
+                ax_lines.append(f"  - {n}")
+            if len(zt_names) > sample_n:
+                ax_lines.append(f"  ... truncated ({len(zt_names) - sample_n} more)")
+        else:
+            ax_lines.append("No zone transfer data (checkbox off or not applicable).")
+        self.enum_axfr.set_heading("Zone transfer (AXFR)", len(zt_names) if zt_names else len(zt_attempts))
+        self.enum_axfr.set_body("\n".join(ax_lines).strip() + "\n")
 
         subs = enum.get("subdomains") or []
         self.enum_subdomains.set_heading("Subdomains", len(subs))

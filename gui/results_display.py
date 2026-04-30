@@ -52,6 +52,28 @@ def format_enumeration(result: dict[str, Any]) -> str:
             for v in values:
                 lines.append(f"  - {v}")
 
+    zt = enum.get("zone_transfer") or {}
+    if zt:
+        lines.append("")
+        lines.append("Zone transfer (AXFR):")
+        lines.append(f"- Apex: {zt.get('apex', '-')}")
+        lines.append(f"- Nodes (zone): {zt.get('discovered_nodes_total', 0)}")
+        lines.append(f"- RDATA rows (approx): {zt.get('rdata_rows', 0)}")
+        for a in (zt.get("attempts") or [])[:15]:
+            ns = a.get("nameserver", "?")
+            where = a.get("where") or "-"
+            ok = a.get("ok")
+            lines.append(f"- NS {ns} @ {where} ok={ok}")
+            if not ok and a.get("error"):
+                lines.append(f"    {str(a.get('error'))[:200]}")
+        names = zt.get("discovered_names") or []
+        if names:
+            lines.append(f"- Names ({len(names)}):")
+            for n in names[:100]:
+                lines.append(f"  - {n}")
+            if len(names) > 100:
+                lines.append(f"  ... truncated ({len(names) - 100} more)")
+
     subs = enum.get("subdomains") or []
     if subs:
         lines += ["", f"Subdomains ({len(subs)}):", *[f"- {s}" for s in subs[:200]]]

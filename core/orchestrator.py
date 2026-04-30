@@ -8,6 +8,7 @@ from core.enumeration.dns_enum import dns_enumerate
 from core.enumeration.port_scan import port_scan
 from core.enumeration.subdomain import discover_subdomains
 from core.enumeration.traceroute import traceroute
+from core.enumeration.zone_transfer import zone_transfer_scan
 from core.models import EnumerationReport, ScanConfig, ScanMode, ScanResult, ScanScope
 from core.utils.network import build_base_urls, is_domain, is_ip, normalize_target, resolve_host
 from core.vulnerability.cve_checker import query_offline_nvd_for_services
@@ -52,6 +53,13 @@ def build_plan(
                 run=lambda result: _run_dns(config, result, cancel_event=cancel_event),
             )
         )
+        if getattr(config, "enable_zone_transfer", False):
+            steps.append(
+                ScanStep(
+                    name="ZoneTransfer",
+                    run=lambda result: _run_zone_transfer(config, result, cancel_event=cancel_event),
+                )
+            )
         steps.append(
             ScanStep(
                 name="Subdomains",
@@ -106,6 +114,32 @@ def _run_dns(config: ScanConfig, result: ScanResult, *, cancel_event=None) -> di
     return {"dns_records": out.records}
 
 
+def _run_zone_transfer(config: ScanConfig, result: ScanResult, *, cancel_event=None) -> dict[str, Any]:
+    out = zone_transfer_scan(
+        config,
+        dns_records=result.enumeration.dns_records,
+        cancel_event=cancel_event,
+    )
+    summary = {
+        "apex": out.apex,
+        "attempts": out.attempts,
+        "discovered_names": out.discovered_names,
+        "discovered_nodes_total": out.discovered_nodes_total,
+        "rdata_rows": out.rdata_rows,
+    }
+    result.enumeration.zone_transfer = summary
+    if out.warnings:
+        result.warnings.extend(out.warnings)
+    # Names from the zone join the subdomain bucket for reporting / later correlation.
+    seen = set(result.enumeration.subdomains)
+    for name in out.discovered_names:
+        if name not in seen:
+            result.enumeration.subdomains.append(name)
+            seen.add(name)
+    result.enumeration.subdomains.sort()
+    return summary
+
+
 def _run_subdomains(
     config: ScanConfig,
     result: ScanResult,
@@ -113,11 +147,19 @@ def _run_subdomains(
     data_dir: Path,
     cancel_event=None,
 ) -> dict[str, Any]:
+    prior = list(result.enumeration.subdomains)
     out = discover_subdomains(config, data_dir=data_dir, cancel_event=cancel_event)
-    result.enumeration.subdomains = out.subdomains
+    seen = set(prior)
+    merged = prior.copy()
+    for s in out.subdomains:
+        if s not in seen:
+            merged.append(s)
+            seen.add(s)
+    merged.sort()
+    result.enumeration.subdomains = merged
     if out.warnings:
         result.warnings.extend(out.warnings)
-    return {"subdomains": out.subdomains, "sources": out.sources}
+    return {"subdomains": merged, "sources": out.sources}
 
 
 def _run_ports(config: ScanConfig, result: ScanResult, *, cancel_event=None) -> dict[str, Any]:
