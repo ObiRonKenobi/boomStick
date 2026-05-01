@@ -51,6 +51,13 @@ class ScanConfig:
     zone_transfer_lifetime_s: float = 60.0
     zone_transfer_max_names: int = 5000
 
+    # Hermetic tests / lab DNS: empty tuple uses system resolver + port 53.
+    dns_nameservers: tuple[str, ...] = ()
+    dns_nameserver_port: int = 53
+
+    # When True, crawl_and_test records visited URLs/forms for accuracy harnesses.
+    export_crawl_telemetry: bool = False
+
     # Safety / throttles
     max_pages: int = 50
     crawl_depth: int = 2

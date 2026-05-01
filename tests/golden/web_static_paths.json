@@ -1,0 +1,4 @@
+{
+  "paths": ["/", "/page2", "/page3", "/formpage"],
+  "disallowed_paths": ["/disallowed/secret"]
+}

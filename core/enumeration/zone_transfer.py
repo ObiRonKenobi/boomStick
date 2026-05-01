@@ -5,10 +5,10 @@ from typing import Any
 
 import dns.name
 import dns.query
-import dns.resolver
 import dns.zone
 
 from core.models import ScanConfig
+from core.utils.dns_resolver_config import resolve_rr
 from core.utils.network import normalize_target
 
 
@@ -22,7 +22,7 @@ def _ns_hosts(dns_records: dict[str, list[str]]) -> list[str]:
     return out
 
 
-def _resolve_ns_ip(ns_hostname: str) -> tuple[str | None, str | None]:
+def _resolve_ns_ip(ns_hostname: str, config: ScanConfig) -> tuple[str | None, str | None]:
     """
     dns.query.xfr requires an address for *where* (not all versions resolve hostnames).
     Try A then AAAA.
@@ -31,7 +31,7 @@ def _resolve_ns_ip(ns_hostname: str) -> tuple[str | None, str | None]:
     last_err: str | None = None
     for rrtype in ("A", "AAAA"):
         try:
-            ans = dns.resolver.resolve(host, rrtype, raise_on_no_answer=False)
+            ans = resolve_rr(config, host, rrtype)
             if ans:
                 return str(ans[0]).strip(), None
         except Exception as e:
@@ -109,7 +109,7 @@ def zone_transfer_scan(
             warnings.append("Zone transfer cancelled")
             break
 
-        where, res_err = _resolve_ns_ip(ns_host)
+        where, res_err = _resolve_ns_ip(ns_host, config)
         rec: dict[str, Any] = {
             "nameserver": ns_host,
             "where": where,

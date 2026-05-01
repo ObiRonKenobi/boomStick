@@ -1,0 +1,16 @@
+# test_id -> primary symbol for Cursor-actionable reports (best-effort line via inspect)
+dns/basic_records:
+  file: core/enumeration/dns_enum.py
+  symbol: dns_enumerate
+
+subdomain/bruteforce:
+  file: core/enumeration/subdomain.py
+  symbol: discover_subdomains
+
+web/crawl_static_graph:
+  file: core/vulnerability/web_vuln.py
+  symbol: crawl_and_test
+
+axfr/allowed_denied:
+  file: core/enumeration/zone_transfer.py
+  symbol: zone_transfer_scan

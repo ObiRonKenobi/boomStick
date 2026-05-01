@@ -1,0 +1,4 @@
+# Development / accuracy harness (pytest + reporting)
+pytest>=8.0
+PyYAML>=6.0
+Flask>=3.0

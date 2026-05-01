@@ -1,0 +1,3 @@
+# Harness wordlist (deterministic)
+www
+api

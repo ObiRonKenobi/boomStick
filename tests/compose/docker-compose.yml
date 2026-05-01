@@ -1,0 +1,35 @@
+# Hermetic stack for integration accuracy tests.
+#   docker compose -f tests/compose/docker-compose.yml up -d
+#   sleep 3   # allow dnsmasq / Flask to settle
+#
+# Windows: Docker Desktop with Linux containers (WSL2 backend). GitHub-hosted
+# windows-latest runners do not include Docker; run integration on ubuntu-latest.
+
+services:
+  dns:
+    image: alpine:3.19
+    volumes:
+      - ./dnsmasq/dnsmasq.conf:/etc/dnsmasq.conf:ro
+    ports:
+      - "5353:53/udp"
+      - "5353:53/tcp"
+    command:
+      - sh
+      - -c
+      - apk add --no-cache dnsmasq >/dev/null && exec dnsmasq --no-daemon --conf-file=/etc/dnsmasq.conf
+
+  web:
+    build:
+      context: ../fixtures/flask_site
+      dockerfile: Dockerfile
+    ports:
+      - "18080:8080"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/', timeout=3)\"",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12

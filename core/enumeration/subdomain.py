@@ -12,12 +12,13 @@ import requests
 
 from core.models import ScanConfig, ScanMode, SubdomainStrategy
 from core.utils.crossplatform import install_amass, install_subfinder, run_cmd_safe
+from core.utils.dns_resolver_config import resolve_rr
 from core.utils.network import normalize_target, is_ip, is_domain
 
 
-def _resolve_a(name: str) -> bool:
+def _resolve_a(name: str, config: ScanConfig) -> bool:
     try:
-        ans = dns.resolver.resolve(name, "A", raise_on_no_answer=False)
+        ans = resolve_rr(config, name, "A")
         return bool(ans)
     except Exception:
         return False
@@ -45,6 +46,7 @@ class SubdomainOutput:
 
 def _bounded_bruteforce(
     domain: str,
+    config: ScanConfig,
     *,
     wordlist: Iterable[str],
     max_attempts: int = 50_000,
@@ -64,7 +66,7 @@ def _bounded_bruteforce(
             break
         attempts += 1
         host = f"{w}.{domain}".strip(".")
-        if _resolve_a(host):
+        if _resolve_a(host, config):
             if host not in found:
                 found.append(host)
             if len(found) >= max_found:
@@ -178,12 +180,12 @@ def discover_subdomains(
     found: list[str] = []
 
     if strategy == "bounded_bruteforce":
-        found, s = _bounded_bruteforce(domain, wordlist=wordlist, cancel_event=cancel_event)
+        found, s = _bounded_bruteforce(domain, config, wordlist=wordlist, cancel_event=cancel_event)
         sources.update(s)
     elif strategy == "passive_plus_bruteforce":
         passive, passive_n = _crtsh_passive(domain, cancel_event=cancel_event)
         sources["crtsh_found"] = passive_n
-        bf, s = _bounded_bruteforce(domain, wordlist=wordlist, cancel_event=cancel_event)
+        bf, s = _bounded_bruteforce(domain, config, wordlist=wordlist, cancel_event=cancel_event)
         sources.update(s)
         found = sorted(set(passive) | set(bf))
     elif strategy == "external_tools_aggressive":
@@ -191,7 +193,7 @@ def discover_subdomains(
             warnings.append("External tools strategy requires loud mode; falling back to passive+bruteforce")
             passive, passive_n = _crtsh_passive(domain, cancel_event=cancel_event)
             sources["crtsh_found"] = passive_n
-            bf, s = _bounded_bruteforce(domain, wordlist=wordlist, cancel_event=cancel_event)
+            bf, s = _bounded_bruteforce(domain, config, wordlist=wordlist, cancel_event=cancel_event)
             sources.update(s)
             found = sorted(set(passive) | set(bf))
         else:
@@ -206,7 +208,7 @@ def discover_subdomains(
                 warnings.append("No external tool results; falling back to passive+bruteforce")
                 passive, passive_n = _crtsh_passive(domain, cancel_event=cancel_event)
                 sources["crtsh_found"] = passive_n
-                bf, s = _bounded_bruteforce(domain, wordlist=wordlist, cancel_event=cancel_event)
+                bf, s = _bounded_bruteforce(domain, config, wordlist=wordlist, cancel_event=cancel_event)
                 sources.update(s)
                 subs |= set(passive) | set(bf)
             found = sorted(subs)

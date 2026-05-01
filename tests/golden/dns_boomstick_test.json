@@ -1,0 +1,8 @@
+{
+  "apex": "boomstick.test",
+  "records": {
+    "A": ["127.0.0.1"],
+    "TXT": ["boomstick-accuracy-v1"],
+    "MX": ["10 mail.boomstick.test"]
+  }
+}

@@ -219,3 +219,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Accuracy harness / pytest outputs (keep artifacts/.gitignore marker only)
+artifacts/*
+!artifacts/.gitignore

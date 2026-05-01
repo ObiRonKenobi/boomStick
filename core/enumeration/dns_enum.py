@@ -6,15 +6,16 @@ import dns.resolver
 
 from core.models import ScanConfig, ScanMode
 from core.utils.crossplatform import detect_tools, install_dig, run_cmd_safe
+from core.utils.dns_resolver_config import resolve_rr
 from core.utils.network import normalize_target, is_ip
 
 
 DNS_TYPES: tuple[str, ...] = ("A", "AAAA", "MX", "NS", "TXT")
 
 
-def _resolve(rrtype: str, name: str) -> list[str]:
+def _resolve(config: ScanConfig, rrtype: str, name: str) -> list[str]:
     try:
-        answers = dns.resolver.resolve(name, rrtype, raise_on_no_answer=False)
+        answers = resolve_rr(config, name, rrtype)
     except Exception:
         return []
     out: list[str] = []
@@ -43,7 +44,7 @@ def dns_enumerate(config: ScanConfig, *, cancel_event=None) -> DnsEnumOutput:
     for rr in DNS_TYPES:
         if cancel_event is not None and cancel_event.is_set():
             break
-        records[rr] = _resolve(rr, target)
+        records[rr] = _resolve(config, rr, target)
 
     raw_dig: str | None = None
     warnings: list[str] = []
