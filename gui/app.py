@@ -15,6 +15,8 @@ import customtkinter as ctk
 from core.models import ScanConfig, ScanMode, ScanScope
 from core.scanner import scan_worker
 from core.utils.crossplatform import detect_tools, platform_name
+from core.utils.gui_prefs import load_gui_prefs, save_gui_prefs
+from gui.results_display import CVE_OPERATOR_BLURB, build_cve_section_lines, format_cves_csv
 from gui.widgets import CollapsibleSection, ScrollableText
 
 
@@ -110,7 +112,10 @@ class MainWindow(ctk.CTk):
         self.cancel_btn.pack(side="left", padx=(0, 8))
 
         self.export_btn = ctk.CTkButton(btns, text="Export JSON", command=self._export_json, state="disabled")
-        self.export_btn.pack(side="left")
+        self.export_btn.pack(side="left", padx=(0, 8))
+
+        self.export_csv_btn = ctk.CTkButton(btns, text="Export CVE CSV", command=self._export_cve_csv, state="disabled")
+        self.export_csv_btn.pack(side="left")
 
     def _build_results(self) -> None:
         self.tabs = ctk.CTkTabview(self)
@@ -151,8 +156,26 @@ class MainWindow(ctk.CTk):
         vtab = self.tabs.tab("Vulnerabilities")
         self.vuln_findings = CollapsibleSection(vtab, title="Findings", start_open=True)
         self.vuln_findings.pack(fill="both", expand=True, padx=10, pady=(10, 6))
+
+        self.hide_low_confidence_cves = ctk.BooleanVar(value=True)
+        cve_opts = ctk.CTkFrame(vtab)
+        cve_opts.pack(fill="x", padx=10, pady=(4, 0))
+        ctk.CTkCheckBox(
+            cve_opts,
+            text="Hide Low match-confidence CVEs",
+            variable=self.hide_low_confidence_cves,
+            command=self._on_hide_low_toggle,
+        ).pack(side="left", anchor="w")
+
         self.vuln_cves = CollapsibleSection(vtab, title="CVEs", start_open=False)
         self.vuln_cves.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        prefs = load_gui_prefs()
+        if "hide_low_confidence_cves" in prefs:
+            try:
+                self.hide_low_confidence_cves.set(bool(prefs["hide_low_confidence_cves"]))
+            except Exception:
+                pass
 
         # Tools tab: diagnostics for external tools + OS
         ttab = self.tabs.tab("Tools")
@@ -218,6 +241,7 @@ class MainWindow(ctk.CTk):
         self._cancel.clear()
         self._last_result = None
         self.export_btn.configure(state="disabled")
+        self.export_csv_btn.configure(state="disabled")
         self.start_btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
         self.progress.set(0.0)
@@ -247,6 +271,16 @@ class MainWindow(ctk.CTk):
         self._cancel.set()
         self.status.configure(text="Cancelling…")
 
+    def _refresh_cve_display(self) -> None:
+        if isinstance(self._last_result, dict):
+            self._render_result(self._last_result)
+
+    def _on_hide_low_toggle(self) -> None:
+        merged = load_gui_prefs()
+        merged["hide_low_confidence_cves"] = bool(self.hide_low_confidence_cves.get())
+        save_gui_prefs(merged)
+        self._refresh_cve_display()
+
     def _export_json(self) -> None:
         if not self._last_result:
             return
@@ -262,6 +296,26 @@ class MainWindow(ctk.CTk):
             messagebox.showinfo("boomStick", "Exported scan results.")
         except Exception as e:
             messagebox.showerror("boomStick", f"Failed to export: {e}")
+
+    def _export_cve_csv(self) -> None:
+        if not self._last_result:
+            return
+        cves = ((self._last_result.get("vulnerabilities") or {}).get("cves")) or []
+        if not cves:
+            messagebox.showinfo("boomStick", "No CVE rows to export.")
+            return
+        path = filedialog.asksaveasfilename(
+            title="Export CVE list",
+            defaultextension=".csv",
+            filetypes=[("CSV", "*.csv")],
+        )
+        if not path:
+            return
+        try:
+            Path(path).write_text(format_cves_csv(cves), encoding="utf8")
+            messagebox.showinfo("boomStick", "Exported CVE CSV.")
+        except Exception as e:
+            messagebox.showerror("boomStick", f"Failed to export CSV: {e}")
 
     def _poll_queue(self) -> None:
         try:
@@ -311,7 +365,9 @@ class MainWindow(ctk.CTk):
 
             self.start_btn.configure(state="normal")
             self.cancel_btn.configure(state="disabled")
-            self.export_btn.configure(state="normal" if self._last_result else "disabled")
+            ex = "normal" if self._last_result else "disabled"
+            self.export_btn.configure(state=ex)
+            self.export_csv_btn.configure(state=ex)
             self.progress.set(1.0)
             self.status.configure(text="Idle")
 
@@ -369,6 +425,17 @@ class MainWindow(ctk.CTk):
         enum = result.get("enumeration") or {}
         vuln = result.get("vulnerabilities") or {}
 
+        cves_all = vuln.get("cves") or []
+        n_high = sum(1 for c in cves_all if str(c.get("confidence_band", "")).lower() == "high")
+        n_med = sum(1 for c in cves_all if str(c.get("confidence_band", "")).lower() == "medium")
+        n_low = sum(1 for c in cves_all if str(c.get("confidence_band", "")).lower() == "low")
+        if cves_all and (n_high + n_med + n_low) == 0:
+            n_low = len(cves_all)
+
+        cve_overview = f"CVEs: {summary.get('cves', 0)}"
+        if cves_all:
+            cve_overview += f" (confidence: High {n_high} / Medium {n_med} / Low {n_low})"
+
         # Overview: show only crucial counts
         overview = [
             f"Target: {summary.get('target', '-')}",
@@ -377,7 +444,7 @@ class MainWindow(ctk.CTk):
             f"Open ports: {summary.get('open_ports', 0)}",
             f"Subdomains: {summary.get('subdomains', 0)}",
             f"Findings: {summary.get('findings', 0)}",
-            f"CVEs: {summary.get('cves', 0)}",
+            cve_overview,
             "",
             f"Warnings: {len(warnings)}",
             f"Errors: {len(errors)}",
@@ -501,32 +568,20 @@ class MainWindow(ctk.CTk):
         self.vuln_findings.set_body("\n".join(f_lines).strip() + ("\n" if f_lines else ""))
 
         cves = vuln.get("cves") or []
+        hide_low = bool(self.hide_low_confidence_cves.get())
+        sec_lines, n_low_hidden = build_cve_section_lines(cves, hide_low_band=hide_low, max_rows=200)
         self.vuln_cves.set_heading("CVEs", len(cves))
+
         c_lines: list[str] = []
-        for c in cves[:200]:
-            cve = c.get("cve")
-            summary_txt = c.get("summary")
-            url = c.get("url")
-            c_lines.append(f"- {cve}")
-            match = c.get("match") or {}
-            svc = c.get("service") or {}
-            if match.get("query"):
-                c_lines.append(f"  Matched query: {match.get('query')}")
-            if svc.get("port") or svc.get("name"):
+        if cves:
+            c_lines.append(CVE_OPERATOR_BLURB)
+            c_lines.append("")
+            if hide_low and n_low_hidden:
                 c_lines.append(
-                    f"  Service: {svc.get('port')}/{(svc.get('proto') or 'tcp')} {svc.get('name') or ''} {svc.get('product') or ''} {svc.get('version') or ''}".strip()
+                    f"{n_low_hidden} Low match-confidence CVE(s) hidden — uncheck 'Hide Low match-confidence CVEs' above to show."
                 )
-            cpes = svc.get("cpes") or match.get("cpes") or []
-            if cpes:
-                c_lines.append("  CPEs:")
-                for cp in cpes[:5]:
-                    c_lines.append(f"    - {cp}")
-            if summary_txt:
-                c_lines.append(f"  {str(summary_txt)[:240]}")
-            if url:
-                c_lines.append(f"  {url}")
-        if len(cves) > 200:
-            c_lines.append(f"... truncated ({len(cves) - 200} more)")
+                c_lines.append("")
+        c_lines.extend(sec_lines)
         self.vuln_cves.set_body("\n".join(c_lines).strip() + ("\n" if c_lines else ""))
 
         # If a scan performed installs, tool availability may have changed.

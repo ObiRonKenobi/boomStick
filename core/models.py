@@ -139,6 +139,8 @@ class EnumerationReport:
     zone_transfer: dict[str, Any] = field(default_factory=dict)
     subdomains: list[str] = field(default_factory=list)
     open_ports: list[Service] = field(default_factory=list)
+    # Populated by builtin WebVuln crawl: destination port -> captured response headers.
+    http_fingerprints_by_port: dict[int, dict[str, str]] = field(default_factory=dict)
     traceroute: list[dict[str, Any]] = field(default_factory=list)  # hop dicts
     raw_tool_output: dict[str, str] = field(default_factory=dict)  # e.g. whois/dig/nmap raw
 

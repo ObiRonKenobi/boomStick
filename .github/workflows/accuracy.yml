@@ -52,6 +52,12 @@ jobs:
           TEST_DNS_PORT: "5353"
           TEST_WEB_ORIGIN: "http://127.0.0.1:18080"
         run: python -m pytest tests/integration -q --junitxml=artifacts/junit-integration.xml
+      - name: Calibration lab (CVE confidence)
+        env:
+          BOOMSTICK_RUN_CALIBRATION: "1"
+          TEST_NGINX_ORIGIN: "http://127.0.0.1:18081"
+          TEST_APACHE_ORIGIN: "http://127.0.0.1:18082"
+        run: python -m pytest tests/calibration -q --junitxml=artifacts/junit-calibration.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:

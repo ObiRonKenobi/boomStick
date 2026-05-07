@@ -211,22 +211,36 @@ def _run_web_vuln(config: ScanConfig, result: ScanResult, *, cancel_event=None) 
         result.vulnerabilities.findings.extend(zap_out.findings)
         if zap_out.warnings:
             result.warnings.extend(zap_out.warnings)
+        if zap_out.http_fingerprints_by_port:
+            for port, meta in zap_out.http_fingerprints_by_port.items():
+                slot = result.enumeration.http_fingerprints_by_port.setdefault(int(port), {})
+                for k, v in meta.items():
+                    if k not in slot:
+                        slot[k] = v
         return {"findings": [f.__dict__ for f in zap_out.findings], "engine": "owasp_zap"}
 
     out = crawl_and_test(config, base_urls=base_urls, cancel_event=cancel_event)
     result.vulnerabilities.findings.extend(out.findings)
     if out.warnings:
         result.warnings.extend(out.warnings)
+    if out.http_fingerprints_by_port:
+        for port, meta in out.http_fingerprints_by_port.items():
+            slot = result.enumeration.http_fingerprints_by_port.setdefault(int(port), {})
+            for k, v in meta.items():
+                if k not in slot:
+                    slot[k] = v
     return {"findings": [f.__dict__ for f in out.findings], "scanned_urls": out.scanned_urls, "engine": "builtin"}
 
 
 def _run_cve(config: ScanConfig, result: ScanResult, *, cancel_event=None) -> dict[str, Any]:
     if not result.enumeration.open_ports:
         return {"skipped": "no_services"}
+    fp = result.enumeration.http_fingerprints_by_port
     out = query_offline_nvd_for_services(
         result.enumeration.open_ports,
         project_root=Path(__file__).resolve().parents[1],
         cancel_event=cancel_event,
+        http_fingerprints_by_port=fp if fp else None,
     )
     result.vulnerabilities.cves.extend(out.cves)
     if out.warnings:

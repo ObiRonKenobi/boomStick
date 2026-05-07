@@ -22,6 +22,12 @@ Use this tool only on systems you own or where you have explicit written permiss
 - **Loud-mode web scanning**: OWASP ZAP (daemon + API alerts; optional spider/active scan)
 - **CVE lookup**: Offline NVD mirror (SQLite) built from NVD JSON feeds (no API rate limits)
 
+### CVE match confidence vs CVSS
+
+Offline CVE hits show **match confidence** (how well the record fits what was observed on the port — CPE, product/version, HTTP headers, NVD criteria) separately from **CVSS** scores from NVD, which describe **severity** only. High CVSS with low match confidence usually means “verify applicability before prioritizing.” In the GUI, **Low** match-confidence rows can be hidden by default to reduce noise; JSON export still contains every hit. Use **Export CVE CSV** for a flat spreadsheet of all CVE rows (including confidence columns).
+
+GUI preferences (for example the Low-hide checkbox) are stored under `%LOCALAPPDATA%\\boomStick\\gui_prefs.json` on Windows or `~/.config/boomStick/gui_prefs.json` on Linux. Override the path with **`BOOMSTICK_GUI_PREFS`** (absolute path to a `.json` file) for portability or tests.
+
 ## Install (Python deps)
 
 Python 3.11+ recommended.

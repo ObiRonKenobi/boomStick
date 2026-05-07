@@ -1,6 +1,9 @@
-# Hermetic stack for integration accuracy tests.
+# Hermetic stack for integration accuracy tests + optional calibration targets.
 #   docker compose -f tests/compose/docker-compose.yml up -d
-#   sleep 3   # allow dnsmasq / Flask to settle
+#   sleep 3   # allow dnsmasq / Flask / nginx / httpd to settle
+#
+# nginx_cal — http://127.0.0.1:18081 (see docs/calibration_lab.md)
+# httpd_cal — http://127.0.0.1:18082 (see docs/calibration_lab.md)
 #
 # Windows: Docker Desktop with Linux containers (WSL2 backend). GitHub-hosted
 # windows-latest runners do not include Docker; run integration on ubuntu-latest.
@@ -33,3 +36,15 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
+
+  # Pinned nginx for CVE confidence / HTTP fingerprint calibration (Phase D).
+  nginx_cal:
+    image: nginx:1.24-alpine
+    ports:
+      - "18081:80"
+
+  # Pinned Apache httpd for nginx↔apache mismatch regression (Phase D).
+  httpd_cal:
+    image: httpd:2.4.67-alpine
+    ports:
+      - "18082:80"

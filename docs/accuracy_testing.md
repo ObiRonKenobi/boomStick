@@ -171,6 +171,7 @@ Workflow: [`.github/workflows/accuracy.yml`](.github/workflows/accuracy.yml)
 
 - **Matrix unit job** — Ubuntu + Windows, `pytest tests/unit`.  
 - **Integration job** — Ubuntu only, `docker compose up`, then `BOOMSTICK_RUN_INTEGRATION=1 pytest tests/integration`.  
+- **Calibration job** — runs as part of the Ubuntu integration job: `BOOMSTICK_RUN_CALIBRATION=1 pytest tests/calibration`.  
 - **Artifacts** — JUnit XML + `artifacts/cursor_report.json` (when failures occur, reports still emit summaries).
 
 Runtime target: integration suite stays small (**under ~10 minutes**) via minimal fixtures and tight crawl limits.
@@ -186,6 +187,18 @@ python tools/update_golden.py --source /tmp/candidate_dns.json --dest tests/gold
 ```
 
 This copies the file and writes a `.sha256` sidecar next to the golden.
+
+---
+
+## Section 9 — CVE confidence calibration lab (optional)
+
+Hermetic **nginx + Apache httpd** containers + pytest markers verify HTTP fingerprint capture used by CVE match confidence (Phase D).
+
+- Doc: [`docs/calibration_lab.md`](calibration_lab.md)
+- Tests: `tests/calibration/` (`@pytest.mark.calibration`, skipped unless `BOOMSTICK_RUN_CALIBRATION=1`)
+- Compose services: `nginx_cal` (host **18081**) + `httpd_cal` (host **18082**) in [`tests/compose/docker-compose.yml`](tests/compose/docker-compose.yml)
+
+Can be run locally after changing bonuses in `cve_confidence.py` (and also runs in CI on `ubuntu-latest`).
 
 ---
 
